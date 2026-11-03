@@ -1,0 +1,38 @@
+# ===== Virtual environment =====
+.venv/
+venv/
+env/
+ 
+# ===== Python cache =====
+__pycache__/
+*.py[cod]
+ 
+# ===== Jupyter =====
+.ipynb_checkpoints/
+ 
+# ===== Dataset (besar / tidak boleh di-push; GitHub menolak file > 100 MB) =====
+*.csv
+*.gz
+*.gzip
+*.zip
+*.parquet
+*.xlsx
+*.xls
+data/
+ 
+# ===== Hasil keluaran lokal =====
+hasil_simulasi_*.csv
+ 
+# ===== Laporan (dikumpulkan terpisah, bukan bagian kode) =====
+Laporan_*.docx
+~$*.docx
+ 
+# ===== Editor / OS =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+ 
+# ===== Rahasia (jangan pernah di-push) =====
+.env
+.streamlit/secrets.toml
