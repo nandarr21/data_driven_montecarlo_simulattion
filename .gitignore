@@ -1,38 +1,37 @@
+
 # ===== Virtual environment =====
 .venv/
 venv/
 env/
- 
+
 # ===== Python cache =====
 __pycache__/
 *.py[cod]
- 
+
 # ===== Jupyter =====
 .ipynb_checkpoints/
- 
-# ===== Dataset (besar / tidak boleh di-push; GitHub menolak file > 100 MB) =====
+
+# ===== Dataset besar =====
 *.csv
-*.gz
 *.gzip
-*.zip
 *.parquet
 *.xlsx
 *.xls
-data/
- 
+*.zip
+
+# Dataset bawaan aplikasi yang harus di-upload
+!data/
+!data/lending_club_sample.csv.gz
+
 # ===== Hasil keluaran lokal =====
 hasil_simulasi_*.csv
- 
-# ===== Laporan (dikumpulkan terpisah, bukan bagian kode) =====
-Laporan_*.docx
-~$*.docx
- 
-# ===== Editor / OS =====
+
+# ===== Editor =====
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
- 
-# ===== Rahasia (jangan pernah di-push) =====
+
+# ===== Environment dan secrets =====
 .env
 .streamlit/secrets.toml
