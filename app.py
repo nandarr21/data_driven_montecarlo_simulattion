@@ -8,6 +8,7 @@ Jalankan: streamlit run app.py
 from __future__ import annotations
 
 import zipfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -32,6 +33,7 @@ UKURAN_CHUNK = 500_000
 MIN_ITERASI = 5_000
 UKURAN_BATCH = 20_000
 SEED_SAMPLING = 42
+DATASET_PATH = Path(__file__).resolve().parent / "data" / "lending_club_sample.csv.gz"
 OPSI_KECUALIKAN = "Kecualikan pinjaman gagal bayar yang recoveries-nya kosong (disarankan)"
 OPSI_IMPUTASI = "Imputasi recoveries kosong dengan median rasio pemulihan (recoveries / loan_amnt)"
 
@@ -265,80 +267,85 @@ def histogram(data, judul, xlabel, warna="#4C78A8", bins=40):
 # --------------------------------------------------------------------------
 # Tab 1: unggah & validasi
 # --------------------------------------------------------------------------
-def tab_data():
-    st.subheader("1. Unggah dataset dan pratinjau data")
-    file = st.file_uploader("Unggah file data pinjaman Lending Club",
-                            type=["csv", "gz", "gzip", "zip", "parquet", "xlsx"],
-                            help="CSV, CSV terkompresi (.gz/.gzip/.zip), Parquet, atau Excel. "
-                                 "Bukan file kamus data (LCDataDictionary.xlsx).")
-    if file is None:
-        st.info("Unggah file **data pinjaman** (mis. dari Kaggle: *Lending Club 2007–2020Q1*) untuk memulai.")
-        return
+def muat_dataset_bawaan():
+    """Muat dataset Lending Club bawaan dari folder data/."""
+    if not DATASET_PATH.exists():
+        raise FileNotFoundError(
+            f"Dataset bawaan tidak ditemukan: {DATASET_PATH}. "
+            "Pastikan folder data/lending_club_sample.csv.gz ikut disertakan."
+        )
 
-    sep_label = st.selectbox("Pemisah kolom CSV", ["Koma (,)", "Titik koma (;)", "Tab"])
-    sep = {"Koma (,)": ",", "Titik koma (;)": ";", "Tab": "\t"}[sep_label]
-    try:
-        pratinjau, fmt = baca_pratinjau(file, sep)
-    except Exception as e:  # noqa: BLE001
-        st.error(f"Gagal membaca file: {e}")
-        return
-
-    st.dataframe(pratinjau)
-    st.caption(f"Format terdeteksi: {fmt} · pratinjau 100 baris pertama · {pratinjau.shape[1]} kolom terdeteksi.")
-    kolom = list(pratinjau.columns)
-    if len(kolom) < 3:
-        st.error("Kurang dari 3 kolom terdeteksi. Coba ganti pemisah kolom.")
-        return
-
-    st.markdown("**Validasi kolom wajib** (terdeteksi otomatis, dapat diubah manual)")
-    peta = {}
-    for wadah, kunci in zip(st.columns(3), KANDIDAT_KOLOM):
-        tebak = tebak_kolom(kolom, KANDIDAT_KOLOM[kunci])
-        with wadah:
-            peta[kunci] = st.selectbox(
-                LABEL_KOLOM[kunci], kolom,
-                index=kolom.index(tebak) if tebak else 0,
-                key=f"peta_{kunci}_{file.name}_{sep}",
-            )
-            if tebak:
-                st.success(f"Terdeteksi: `{tebak}`")
-            else:
-                st.warning("Tidak terdeteksi otomatis — pilih kolom yang sesuai.")
-    if len(set(peta.values())) < 3:
-        st.error("Ketiga peran kolom harus dipetakan ke kolom yang berbeda.")
-        return
-
-    persen = st.slider(
-        "Persentase baris yang dibaca (sampel acak, seed tetap)", 5, 100, 100, step=5,
-        help="Dataset Lending Club sangat besar. Turunkan persentase bila memori terbatas "
-             "(mis. di Streamlit Community Cloud).",
+    df = pd.read_csv(
+        DATASET_PATH,
+        compression="gzip",
+        usecols=["loan_amnt", "recoveries", "loan_status"],
+        low_memory=False,
     )
 
-    if st.button("Muat & validasi data", type="primary"):
-        with st.spinner("Membaca data..."):
-            try:
-                df, info = baca_data(file, sep, peta, persen, SEED_SAMPLING)
-            except Exception as e:  # noqa: BLE001
-                st.error(f"Gagal memuat data: {e}")
-                return
-        if df["loan_amnt"].notna().mean() < 0.5:
-            st.error(f"Kolom `{peta['loan_amnt']}` sebagian besar tidak numerik. Pilih kolom yang benar.")
-            return
-        st.session_state["raw"] = df
-        st.session_state["raw_info"] = info | {"sumber": file.name, "peta": peta}
-        st.session_state["raw_id"] = st.session_state.get("raw_id", 0) + 1
-        for k in ("pool", "pool_key", "hasil"):
-            st.session_state.pop(k, None)
+    gagal_jumlah = int(pd.to_numeric(df["loan_amnt"], errors="coerce").isna().sum())
+    gagal_rec = int(pd.to_numeric(df["recoveries"], errors="coerce").isna().sum())
+    df["loan_amnt"] = pd.to_numeric(df["loan_amnt"], errors="coerce")
+    df["recoveries"] = pd.to_numeric(df["recoveries"], errors="coerce")
+    df["loan_status"] = df["loan_status"].astype("string").str.strip().astype("category")
 
-    info = st.session_state.get("raw_info")
-    if info:
-        st.success(
-            f"Data termuat dari **{info['sumber']}**: {fmt_int(info['baris_dimuat'])} baris "
-            f"(dari {fmt_int(info['baris_file'])} baris file). "
-            f"Nilai non-numerik diubah jadi kosong: loan_amnt {fmt_int(info['gagal_konversi_jumlah'])}, "
-            f"recoveries {fmt_int(info['gagal_konversi_rec'])}."
+    info = {
+        "baris_file": len(df),
+        "baris_dimuat": len(df),
+        "gagal_konversi_jumlah": gagal_jumlah,
+        "gagal_konversi_rec": gagal_rec,
+        "sumber": DATASET_PATH.name,
+    }
+    return df, info
+
+
+@st.cache_data(show_spinner="Memuat dataset Lending Club...")
+def baca_dataset_bawaan():
+    """Cache pembacaan dataset agar tidak dibaca ulang pada setiap interaksi."""
+    return muat_dataset_bawaan()
+
+
+# --------------------------------------------------------------------------
+# Tab 1: dataset bawaan
+# --------------------------------------------------------------------------
+def tab_data():
+    st.subheader("1. Dataset Lending Club (dimuat otomatis)")
+    st.caption(
+        "Aplikasi menggunakan dataset bawaan. Pengguna tidak perlu mengunggah file "
+        "setiap kali membuka website."
+    )
+
+    try:
+        if "raw" not in st.session_state:
+            df, info = baca_dataset_bawaan()
+            st.session_state["raw"] = df
+            st.session_state["raw_info"] = info
+            st.session_state["raw_id"] = st.session_state.get("raw_id", 0) + 1
+            for k in ("pool", "pool_key", "pool_r", "hasil"):
+                st.session_state.pop(k, None)
+        else:
+            df = st.session_state["raw"]
+            info = st.session_state["raw_info"]
+    except Exception as e:  # noqa: BLE001
+        st.error(f"Gagal memuat dataset bawaan: {e}")
+        st.info(
+            "Pastikan file `lending_club_sample.csv.gz` berada di dalam folder `data` "
+            "yang sejajar dengan `app.py`."
         )
-        st.caption("Lanjut ke tab **Pembersihan & Statistik**.")
+        return
+
+    st.success(
+        f"Dataset berhasil dimuat: **{fmt_int(info['baris_dimuat'])} baris**. "
+        f"File: `{info['sumber']}`."
+    )
+    st.dataframe(df.head(100), use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Jumlah baris", fmt_int(len(df)))
+    c2.metric("Kolom digunakan", "3")
+    c3.metric("Status dataset", "Siap digunakan")
+    st.caption(
+        "Kolom yang digunakan: `loan_amnt`, `recoveries`, dan `loan_status`. "
+        "Lanjutkan ke tab **Pembersihan & Statistik** untuk memeriksa status pinjaman."
+    )
 
 
 # --------------------------------------------------------------------------
@@ -554,7 +561,7 @@ Hasil dapat direproduksi dengan seed, data, dan parameter yang sama.
    yang akan terjadi pada pinjaman yang masih berjalan.
 3. Pinjaman diasumsikan saling bebas dan identik secara statistik; korelasi (mis. resesi) dan perbedaan grade/tahun
    tidak dimodelkan.
-4. Hasil bergantung pada data yang diunggah dan pada pemilihan status; tidak ada data buatan yang digunakan aplikasi ini.
+4. Hasil bergantung pada dataset Lending Club bawaan dan pada pemilihan status; tidak ada data buatan yang digunakan aplikasi ini.
 5. Satuan mengikuti dataset (US$).
 """
     )
@@ -569,7 +576,7 @@ def main():
     with st.sidebar:
         st.header("Alur penggunaan")
         st.markdown(
-            "1. Unggah CSV dan validasi kolom\n"
+            "1. Dataset Lending Club dimuat otomatis\n"
             "2. Pilih status lunas / gagal bayar\n"
             "3. Lihat statistik & histogram data asli\n"
             "4. Jalankan simulasi, atur anggaran\n"
